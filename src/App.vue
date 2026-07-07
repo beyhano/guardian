@@ -22,7 +22,8 @@ const processes = ref<ProcessInfo[]>([]);
 const selectedProcessId = ref<string | null>(null);
 const logs = ref<string[]>([]);
 const logTerminals = ref<Record<string, string[]>>({});
-const isAddingProcess = ref(false);
+const isProcessModalOpen = ref(false);
+const editingProcessId = ref<string | null>(null);
 const autoScroll = ref(true);
 const terminalRef = ref<HTMLElement | null>(null);
 
@@ -231,7 +232,35 @@ async function handleRemoveProcess(id: string) {
   }
 }
 
-async function handleAddProcess() {
+function editProcess(id: string) {
+  const process = processes.value.find(p => p.id === id);
+  if (!process) return;
+
+  newProcess.value = {
+    id: process.id,
+    name: process.name,
+    command: process.command,
+    cwd: "",
+    auto_restart: true,
+    max_restarts: 5,
+    auto_start: true,
+  };
+  argsInput.value = process.args.join(" ");
+  editingProcessId.value = id;
+  isProcessModalOpen.value = true;
+}
+
+function closeModal() {
+  isProcessModalOpen.value = false;
+  editingProcessId.value = null;
+  newProcess.value = {
+    id: "", name: "", command: "", cwd: "",
+    auto_restart: true, max_restarts: 5, auto_start: true,
+  };
+  argsInput.value = "";
+}
+
+async function handleSaveProcess() {
   if (!newProcess.value.id || !newProcess.value.name || !newProcess.value.command) {
     Swal.fire({
       title: "Eksik Bilgi!",
@@ -259,8 +288,14 @@ async function handleAddProcess() {
   };
 
   try {
-    await invoke("add_process", { config });
-    isAddingProcess.value = false;
+    if (editingProcessId.value) {
+      await invoke("update_process", { id: editingProcessId.value, config });
+    } else {
+      await invoke("add_process", { config });
+    }
+
+    editingProcessId.value = null;
+    isProcessModalOpen.value = false;
     // reset form
     newProcess.value = {
       id: "",
@@ -273,9 +308,10 @@ async function handleAddProcess() {
     };
     argsInput.value = "";
     await fetchProcesses();
+
     Swal.fire({
       title: "Başarılı!",
-      text: "Yeni süreç başarıyla eklendi.",
+      text: "Süreç başarıyla kaydedildi.",
       icon: "success",
       timer: 1500,
       showConfirmButton: false,
@@ -285,7 +321,7 @@ async function handleAddProcess() {
   } catch (error) {
     Swal.fire({
       title: "Hata!",
-      text: `Ekleme hatası: ${error}`,
+      text: `Kaydetme hatası: ${error}`,
       icon: "error",
       background: "#151b2d",
       color: "#f3f4f6",
@@ -380,7 +416,7 @@ onUnmounted(() => {
           <p>Windows Supervisor Engine</p>
         </div>
       </div>
-      <button class="btn btn-primary" @click="isAddingProcess = true">
+      <button class="btn btn-primary" @click="isProcessModalOpen = true">
         <span class="btn-icon">+</span> Yeni Süreç Ekle
       </button>
       <UpdateManager />
@@ -482,6 +518,13 @@ onUnmounted(() => {
                 📋 Loglar
               </button>
               <button
+                class="btn-action btn-edit"
+                title="Düzenle"
+                @click="editProcess(p.id)"
+              >
+                ✏️ Düzenle
+              </button>
+              <button
                 class="btn-action btn-danger"
                 title="Kaldır"
                 @click="handleRemoveProcess(p.id)"
@@ -532,13 +575,13 @@ onUnmounted(() => {
     </div>
 
     <!-- Add Process Modal Overlay -->
-    <div class="modal-overlay" v-if="isAddingProcess" @click.self="isAddingProcess = false">
+    <div class="modal-overlay" v-if="isProcessModalOpen" @click.self="closeModal">
       <div class="modal-card">
         <div class="modal-header">
-          <h2>Yeni Süreç Yapılandır</h2>
-          <button class="close-btn" @click="isAddingProcess = false">&times;</button>
+          <h2>{{ editingProcessId ? 'Süreci Düzenle' : 'Yeni Süreç Yapılandır' }}</h2>
+          <button class="close-btn" @click="closeModal">&times;</button>
         </div>
-        <form @submit.prevent="handleAddProcess" class="modal-form">
+        <form @submit.prevent="handleSaveProcess" class="modal-form">
           <div class="form-group-row">
             <div class="form-group">
               <label for="proc-id">Süreç ID (Benzersiz)</label>
@@ -547,6 +590,7 @@ onUnmounted(() => {
                 id="proc-id"
                 v-model="newProcess.id"
                 placeholder="örn. web-server"
+                :disabled="!!editingProcessId"
                 required
               />
             </div>
@@ -620,10 +664,12 @@ onUnmounted(() => {
           </div>
 
           <div class="modal-actions">
-            <button type="button" class="btn btn-secondary" @click="isAddingProcess = false">
+            <button type="button" class="btn btn-secondary" @click="closeModal">
               İptal
             </button>
-            <button type="submit" class="btn btn-primary">Kaydet ve Ekle</button>
+            <button type="submit" class="btn btn-primary">
+              {{ editingProcessId ? 'Değişiklikleri Kaydet' : 'Kaydet ve Ekle' }}
+            </button>
           </div>
         </form>
       </div>
