@@ -25,5 +25,6 @@ serde_json = "1"
 tokio = { version = "1.52.3", features = ["full"] }
 chrono = { version = "0.4.45", features = ["serde"] }
 tauri-plugin-dialog = "2.7.1"
+tauri-plugin-updater = "2"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 
