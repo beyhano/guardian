@@ -7,44 +7,49 @@ import Swal from 'sweetalert2'
 const checking = ref(false)
 let autoCheckTimer: ReturnType<typeof setTimeout> | null = null
 
-async function checkForUpdates() {
+async function promptAndInstall(update: Awaited<ReturnType<typeof check>>) {
+  if (!update?.available) return
+
+  const result = await Swal.fire({
+    title: 'Güncelleme Mevcut',
+    html: `
+      <p><strong>v${update.version}</strong> kullanılabilir.</p>
+      <p style="font-size:0.85em;color:#888;margin-top:8px;">${update.body || ''}</p>
+      <p style="margin-top:12px;">Şimdi güncellemek istiyor musunuz?</p>
+    `,
+    icon: 'info',
+    showCancelButton: true,
+    confirmButtonText: 'Güncelle',
+    cancelButtonText: 'Daha Sonra',
+    confirmButtonColor: '#6c5ce7',
+    background: '#1a1a2e',
+    color: '#eee',
+  })
+
+  if (result.isConfirmed) {
+    Swal.fire({
+      title: 'Güncelleme İndiriliyor...',
+      html: '<div style="text-align:center;padding:1rem"><div style="width:28px;height:28px;border:3px solid rgba(108,92,231,0.3);border-top-color:#6c5ce7;border-radius:50%;animation:update-spin 0.6s linear infinite;margin:0 auto"></div></div><style>@keyframes update-spin{to{transform:rotate(360deg)}}</style>',
+      allowOutsideClick: false,
+      showConfirmButton: false,
+      background: '#1a1a2e',
+      color: '#eee',
+    })
+
+    await update.downloadAndInstall()
+    await relaunch()
+  }
+}
+
+async function checkForUpdates(silent = false) {
   if (checking.value) return
   checking.value = true
 
   try {
     const update = await check()
-
     if (update?.available) {
-      const result = await Swal.fire({
-        title: 'Güncelleme Mevcut',
-        html: `
-          <p><strong>v${update.version}</strong> kullanılabilir.</p>
-          <p style="font-size:0.85em;color:#888;margin-top:8px;">${update.body || ''}</p>
-          <p style="margin-top:12px;">Şimdi güncellemek istiyor musunuz?</p>
-        `,
-        icon: 'info',
-        showCancelButton: true,
-        confirmButtonText: 'Güncelle',
-        cancelButtonText: 'Daha Sonra',
-        confirmButtonColor: '#6c5ce7',
-        background: '#1a1a2e',
-        color: '#eee',
-      })
-
-      if (result.isConfirmed) {
-        Swal.fire({
-          title: 'Güncelleme İndiriliyor...',
-          html: '<div style="text-align:center;padding:1rem"><div class="update-spinner"></div></div>',
-          allowOutsideClick: false,
-          showConfirmButton: false,
-          background: '#1a1a2e',
-          color: '#eee',
-        })
-
-        await update.downloadAndInstall()
-        await relaunch()
-      }
-    } else {
+      await promptAndInstall(update)
+    } else if (!silent) {
       await Swal.fire({
         title: 'Güncelleme Yok',
         text: 'Zaten en son sürümü kullanıyorsunuz.',
@@ -56,63 +61,23 @@ async function checkForUpdates() {
       })
     }
   } catch (err) {
-    // Manuele kontrolde hatayı kullanıcıya göster
-    await Swal.fire({
-      title: 'Kontrol Başarısız',
-      text: `Güncelleme kontrolü yapılamadı: ${err}`,
-      icon: 'error',
-      confirmButtonText: 'Tamam',
-      confirmButtonColor: '#6c5ce7',
-      background: '#1a1a2e',
-      color: '#eee',
-    })
+    if (!silent) {
+      await Swal.fire({
+        title: 'Kontrol Başarısız',
+        text: `Güncelleme kontrolü yapılamadı: ${err}`,
+        icon: 'error',
+        confirmButtonColor: '#6c5ce7',
+        background: '#1a1a2e',
+        color: '#eee',
+      })
+    }
   } finally {
     checking.value = false
   }
 }
 
 onMounted(() => {
-  // Uygulama açıldığında arka planda kontrol et (3 saniye gecikmeli)
-  autoCheckTimer = setTimeout(async () => {
-    if (checking.value) return
-    checking.value = true
-    try {
-      const update = await check()
-      if (update?.available) {
-        const result = await Swal.fire({
-          title: 'Güncelleme Mevcut',
-          html: `
-            <p><strong>v${update.version}</strong> kullanılabilir.</p>
-            <p style="font-size:0.85em;color:#888;margin-top:8px;">${update.body || ''}</p>
-            <p style="margin-top:12px;">Şimdi güncellemek istiyor musunuz?</p>
-          `,
-          icon: 'info',
-          showCancelButton: true,
-          confirmButtonText: 'Güncelle',
-          cancelButtonText: 'Daha Sonra',
-          confirmButtonColor: '#6c5ce7',
-          background: '#1a1a2e',
-          color: '#eee',
-        })
-        if (result.isConfirmed) {
-          Swal.fire({
-            title: 'Güncelleme İndiriliyor...',
-            html: '<div style="text-align:center;padding:1rem"><div class="update-spinner"></div></div>',
-            allowOutsideClick: false,
-            showConfirmButton: false,
-            background: '#1a1a2e',
-            color: '#eee',
-          })
-          await update.downloadAndInstall()
-          await relaunch()
-        }
-      }
-    } catch {
-      // Arka plan kontrolü sessizce başarısız olabilir
-    } finally {
-      checking.value = false
-    }
-  }, 3000)
+  autoCheckTimer = setTimeout(() => checkForUpdates(true), 3000)
 })
 
 onUnmounted(() => {
@@ -124,7 +89,7 @@ onUnmounted(() => {
   <button
     class="update-btn"
     :disabled="checking"
-    @click="checkForUpdates"
+    @click="checkForUpdates()"
     :title="checking ? 'Kontrol ediliyor...' : 'Güncellemeleri Kontrol Et'"
   >
     <span v-if="checking" class="spinner-small"></span>
