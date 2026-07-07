@@ -5,8 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import Swal from "sweetalert2";
 import "sweetalert2/dist/sweetalert2.min.css";
-
-
+import UpdateManager from "./components/UpdateManager.vue";
 
 interface ProcessInfo {
   id: string;
@@ -384,6 +383,7 @@ onUnmounted(() => {
       <button class="btn btn-primary" @click="isAddingProcess = true">
         <span class="btn-icon">+</span> Yeni Süreç Ekle
       </button>
+      <UpdateManager />
     </header>
 
     <!-- Stats Dashboard -->
