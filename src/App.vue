@@ -60,6 +60,21 @@ async function fetchProcesses() {
   }
 }
 
+async function browseDirectory() {
+  try {
+    const selected = await open({
+      multiple: false,
+      directory: true,
+      title: "Çalışma Dizini Seç",
+    });
+    if (selected && typeof selected === "string") {
+      newProcess.value.cwd = selected;
+    }
+  } catch (error) {
+    console.error("Failed to select directory:", error);
+  }
+}
+
 async function browseExecutable() {
   try {
     const selected = await open({
@@ -634,12 +649,17 @@ onUnmounted(() => {
 
           <div class="form-group">
             <label for="proc-cwd">Çalışma Dizini (CWD - Opsiyonel)</label>
-            <input
-              type="text"
-              id="proc-cwd"
-              v-model="newProcess.cwd"
-              placeholder="örn. C:\Users\Proje"
-            />
+            <div class="input-with-button">
+              <input
+                type="text"
+                id="proc-cwd"
+                v-model="newProcess.cwd"
+                placeholder="örn. C:\Users\Proje"
+              />
+              <button type="button" class="btn btn-secondary" @click="browseDirectory">
+                Gözat...
+              </button>
+            </div>
           </div>
 
           <div class="checkbox-group">
