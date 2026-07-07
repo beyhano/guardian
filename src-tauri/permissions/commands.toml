@@ -1,0 +1,11 @@
+[[permission]]
+identifier = "allow-all-commands"
+description = "Allows all custom commands from the app"
+commands.allow = [
+  "get_processes",
+  "start_process",
+  "stop_process",
+  "add_process",
+  "remove_process",
+  "get_process_logs"
+]
