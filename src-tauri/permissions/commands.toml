@@ -7,5 +7,6 @@ commands.allow = [
   "stop_process",
   "add_process",
   "remove_process",
-  "get_process_logs"
+  "get_process_logs",
+  "update_process"
 ]

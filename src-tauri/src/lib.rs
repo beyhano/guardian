@@ -50,6 +50,15 @@ async fn get_process_logs(
     manager.get_process_logs(&id, max_lines)
 }
 
+#[tauri::command]
+async fn update_process(
+    id: String,
+    config: process_manager::ProcessConfig,
+    manager: tauri::State<'_, process_manager::ProcessManager>,
+) -> Result<(), String> {
+    manager.update_process(&id, config).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -77,7 +86,8 @@ pub fn run() {
             stop_process,
             add_process,
             remove_process,
-            get_process_logs
+            get_process_logs,
+            update_process
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
