@@ -404,6 +404,16 @@ impl ProcessManager {
             if !cwd.trim().is_empty() {
                 cmd.current_dir(cwd);
             }
+        } else {
+            // cwd belirtilmemisse command yolunun bulundugu dizini kullan
+            // (.env gibi goreceli yollarin dogru cozulmesi icin)
+            let cmd_path = std::path::Path::new(&process.config.command);
+            if let Some(parent) = cmd_path.parent() {
+                let parent_str = parent.to_string_lossy();
+                if !parent_str.is_empty() {
+                    cmd.current_dir(parent);
+                }
+            }
         }
 
         cmd.stdout(std::process::Stdio::piped());
