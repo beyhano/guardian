@@ -12,6 +12,7 @@ interface ProcessInfo {
   name: string;
   command: string;
   args: string[];
+  cwd?: string;
   status: "Stopped" | "Running" | "Crashed" | "Restarting" | "Stopping";
   restart_count: number;
   pid?: number;
@@ -255,7 +256,7 @@ function editProcess(id: string) {
     id: process.id,
     name: process.name,
     command: process.command,
-    cwd: "",
+    cwd: process.cwd || "",
     auto_restart: true,
     max_restarts: 5,
     auto_start: true,
