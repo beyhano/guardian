@@ -6,15 +6,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import Swal from "sweetalert2";
 import "sweetalert2/dist/sweetalert2.min.css";
 
-interface ProcessConfig {
-  id: string;
-  name: string;
-  command: string;
-  args: string[];
-  cwd?: string;
-  auto_restart: boolean;
-  max_restarts: number;
-}
+
 
 interface ProcessInfo {
   id: string;
@@ -117,34 +109,82 @@ function scrollToBottom() {
 }
 
 async function handleStartProcess(id: string) {
-  try {
-    await invoke("start_process", { id });
-    await fetchProcesses();
-  } catch (error) {
-    Swal.fire({
-      title: "Hata!",
-      text: `Süreç başlatılamadı: ${error}`,
-      icon: "error",
-      background: "#151b2d",
-      color: "#f3f4f6",
-      confirmButtonColor: "#3b82f6",
-    });
+  const result = await Swal.fire({
+    title: "Süreci Başlat?",
+    text: `"${id}" sürecini başlatmak istediğinizden emin misiniz?`,
+    icon: "question",
+    showCancelButton: true,
+    confirmButtonText: "Evet, Başlat",
+    cancelButtonText: "İptal",
+    background: "#151b2d",
+    color: "#f3f4f6",
+    confirmButtonColor: "#3b82f6",
+    cancelButtonColor: "rgba(255, 255, 255, 0.08)",
+  });
+
+  if (result.isConfirmed) {
+    try {
+      await invoke("start_process", { id });
+      await fetchProcesses();
+      Swal.fire({
+        title: "Başlatıldı!",
+        text: "Süreç başarıyla başlatıldı.",
+        icon: "success",
+        timer: 1500,
+        showConfirmButton: false,
+        background: "#151b2d",
+        color: "#f3f4f6",
+      });
+    } catch (error) {
+      Swal.fire({
+        title: "Hata!",
+        text: `Süreç başlatılamadı: ${error}`,
+        icon: "error",
+        background: "#151b2d",
+        color: "#f3f4f6",
+        confirmButtonColor: "#3b82f6",
+      });
+    }
   }
 }
 
 async function handleStopProcess(id: string) {
-  try {
-    await invoke("stop_process", { id });
-    await fetchProcesses();
-  } catch (error) {
-    Swal.fire({
-      title: "Hata!",
-      text: `Süreç durdurulamadı: ${error}`,
-      icon: "error",
-      background: "#151b2d",
-      color: "#f3f4f6",
-      confirmButtonColor: "#3b82f6",
-    });
+  const result = await Swal.fire({
+    title: "Süreci Durdur?",
+    text: `"${id}" sürecini durdurmak istediğinizden emin misiniz?`,
+    icon: "warning",
+    showCancelButton: true,
+    confirmButtonText: "Evet, Durdur",
+    cancelButtonText: "İptal",
+    background: "#151b2d",
+    color: "#f3f4f6",
+    confirmButtonColor: "#ef4444",
+    cancelButtonColor: "rgba(255, 255, 255, 0.08)",
+  });
+
+  if (result.isConfirmed) {
+    try {
+      await invoke("stop_process", { id });
+      await fetchProcesses();
+      Swal.fire({
+        title: "Durduruldu!",
+        text: "Süreç başarıyla durduruldu.",
+        icon: "success",
+        timer: 1500,
+        showConfirmButton: false,
+        background: "#151b2d",
+        color: "#f3f4f6",
+      });
+    } catch (error) {
+      Swal.fire({
+        title: "Hata!",
+        text: `Süreç durdurulamadı: ${error}`,
+        icon: "error",
+        background: "#151b2d",
+        color: "#f3f4f6",
+        confirmButtonColor: "#3b82f6",
+      });
+    }
   }
 }
 
@@ -718,11 +758,19 @@ body {
 
 /* Main Workspace */
 .workspace {
-  display: grid;
-  grid-template-columns: 320px 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 1.5rem;
   flex: 1;
   min-height: 0; /* Important for scroll limits */
+}
+
+.process-section {
+  flex: 1;
+}
+
+.terminal-section {
+  flex: 1.2;
 }
 
 .process-section, .terminal-section {
@@ -753,9 +801,9 @@ body {
 }
 
 .process-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 400px));
+  gap: 1rem;
   padding: 1.25rem;
   overflow-y: auto;
   flex: 1;
