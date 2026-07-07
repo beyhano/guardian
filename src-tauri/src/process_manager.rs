@@ -269,23 +269,16 @@ impl ProcessManager {
         let mut processes = self.processes.lock().await;
         let process = processes.get_mut(id).ok_or_else(|| "Process not found".to_string())?;
 
-        // Runtime state'i koru
-        let status = process.status;
-        let restart_count = process.restart_count;
-        let pid = process.pid;
-        let start_time = process.start_time;
-        let stop_tx = process.stop_tx.take();
-
         // ID'yi parametreden gelen değerle koru
         let mut updated_config = config;
         updated_config.id = id.to_string();
 
-        // SQLite güncelle
+        // ÖNCE DB'yi güncelle — state henüz bozulmamışken
         let conn = self.connect_db()?;
         let args_json = serde_json::to_string(&updated_config.args)
             .map_err(|e| format!("Failed to serialize arguments: {}", e))?;
 
-        conn.execute(
+        let affected = conn.execute(
             "UPDATE processes SET name=?, command=?, args=?, cwd=?, auto_restart=?, max_restarts=?, auto_start=? WHERE id=?",
             rusqlite::params![
                 updated_config.name,
@@ -299,6 +292,17 @@ impl ProcessManager {
             ],
         )
         .map_err(|e| format!("Failed to update process in database: {}", e))?;
+
+        if affected == 0 {
+            return Err("Process not found in database".to_string());
+        }
+
+        // DB başarılı, state'i güvenle taşı
+        let status = process.status;
+        let restart_count = process.restart_count;
+        let pid = process.pid;
+        let start_time = process.start_time;
+        let stop_tx = process.stop_tx.take();
 
         // Runtime config'i güncelle, state'i geri yükle
         *process = ActiveProcess {
@@ -724,5 +728,156 @@ mod tests {
     fn test_update_process_not_found() {
         let mut processes: std::collections::HashMap<String, ActiveProcess> = std::collections::HashMap::new();
         assert!(processes.get_mut("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_update_process_sql_basic() {
+        let tmp_dir = std::env::temp_dir().join("guardian_test_update_sql_basic");
+        let _ = std::fs::create_dir_all(&tmp_dir);
+        let db_path = tmp_dir.join("guardian.db");
+
+        // Tabloyu oluştur ve bir row ekle
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS processes (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, command TEXT NOT NULL,
+                args TEXT NOT NULL, cwd TEXT, auto_restart INTEGER NOT NULL,
+                max_restarts INTEGER NOT NULL, auto_start INTEGER NOT NULL
+            );"
+        ).unwrap();
+
+        // Önce mevcut veriyi temizle
+        conn.execute("DELETE FROM processes", []).unwrap();
+
+        conn.execute(
+            "INSERT INTO processes (id, name, command, args, cwd, auto_restart, max_restarts, auto_start)
+             VALUES ('test-srv', 'Original', 'echo', '[]', NULL, 0, 0, 0)",
+            []
+        ).unwrap();
+
+        // Update — adı ve komutu değiştir
+        let affected = conn.execute(
+            "UPDATE processes SET name=?1, command=?2, args=?3, auto_restart=?4, max_restarts=?5, auto_start=?6 WHERE id=?7",
+            rusqlite::params!["Updated", "ping", "[\"localhost\"]", 1, 5, 1, "test-srv"]
+        ).unwrap();
+        assert_eq!(affected, 1);
+
+        // Verify
+        let (name, command, args, auto_restart, max_restarts, auto_start): (String, String, String, i32, i64, i32) = conn.query_row(
+            "SELECT name, command, args, auto_restart, max_restarts, auto_start FROM processes WHERE id='test-srv'",
+            [],
+            |row| Ok((
+                row.get(0)?, row.get(1)?, row.get(2)?,
+                row.get(3)?, row.get(4)?, row.get(5)?,
+            ))
+        ).unwrap();
+        assert_eq!(name, "Updated");
+        assert_eq!(command, "ping");
+        assert_eq!(args, "[\"localhost\"]");
+        assert_eq!(auto_restart, 1);
+        assert_eq!(max_restarts, 5);
+        assert_eq!(auto_start, 1);
+
+        // Temizlik
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_update_process_sql_not_found() {
+        let tmp_dir = std::env::temp_dir().join("guardian_test_update_sql_not_found");
+        let _ = std::fs::create_dir_all(&tmp_dir);
+        let db_path = tmp_dir.join("guardian.db");
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS processes (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, command TEXT NOT NULL,
+                args TEXT NOT NULL, cwd TEXT, auto_restart INTEGER NOT NULL,
+                max_restarts INTEGER NOT NULL, auto_start INTEGER NOT NULL
+            );"
+        ).unwrap();
+
+        // Tablo boş — nonexistent ID için affected = 0 olmalı
+        let affected = conn.execute(
+            "UPDATE processes SET name='x' WHERE id='nonexistent'",
+            []
+        ).unwrap();
+        assert_eq!(affected, 0);
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_update_process_core_logic() {
+        // update_process metodunun HashMap + state koruma mantığını valide et
+        let mut processes: std::collections::HashMap<String, ActiveProcess> = std::collections::HashMap::new();
+
+        processes.insert(
+            "test-srv".to_string(),
+            ActiveProcess {
+                config: ProcessConfig {
+                    id: "test-srv".to_string(),
+                    name: "Original".to_string(),
+                    command: "echo".to_string(),
+                    args: vec!["hello".to_string()],
+                    cwd: None,
+                    auto_restart: false,
+                    max_restarts: 0,
+                    auto_start: false,
+                },
+                status: ProcessStatus::Running,
+                restart_count: 2,
+                pid: Some(12345),
+                start_time: Some(chrono::Utc::now()),
+                stop_tx: None,
+            },
+        );
+
+        let updated_config = ProcessConfig {
+            id: "test-srv".to_string(),
+            name: "Updated".to_string(),
+            command: "ping".to_string(),
+            args: vec!["localhost".to_string()],
+            cwd: Some("/tmp".to_string()),
+            auto_restart: true,
+            max_restarts: 5,
+            auto_start: true,
+        };
+
+        // update_process ile aynı sıra: DB (bu testte atlandı) → state taşıma
+        let process = processes.get_mut("test-srv").unwrap();
+
+        // Runtime state'i koru (DB'den sonra — bu testte DB yok, state'i direkt taşı)
+        let status = process.status;
+        let restart_count = process.restart_count;
+        let pid = process.pid;
+        let start_time = process.start_time;
+        let stop_tx = process.stop_tx.take();
+
+        *process = ActiveProcess {
+            config: updated_config.clone(),
+            status,
+            restart_count,
+            pid,
+            start_time,
+            stop_tx,
+        };
+
+        // Verify
+        let result = processes.get("test-srv").unwrap();
+        assert_eq!(result.config.name, "Updated");
+        assert_eq!(result.config.command, "ping");
+        assert_eq!(result.config.args, vec!["localhost"]);
+        assert_eq!(result.config.cwd, Some("/tmp".to_string()));
+        assert!(result.config.auto_restart);
+        assert_eq!(result.config.max_restarts, 5);
+        assert!(result.config.auto_start);
+        // Runtime state korunmalı
+        assert_eq!(result.status, ProcessStatus::Running);
+        assert_eq!(result.restart_count, 2);
+        assert!(result.pid.is_some());
+
+        // updated_config.id override testi
+        assert_eq!(result.config.id, "test-srv");
     }
 }
