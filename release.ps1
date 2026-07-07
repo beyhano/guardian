@@ -96,12 +96,12 @@ $paths = @("src-tauri\tauri.conf.json", "package.json")
 foreach ($p in $paths) {
     $c = Get-Content $p -Raw
     $c = $c -replace '"version": ' + $vOld, '"version": ' + $vNew
-    Set-Content $p -Value $c -NoNewline
+    [System.IO.File]::WriteAllText((Resolve-Path $p).Path, $c)
 }
 
 $cargo = Get-Content "src-tauri\Cargo.toml" -Raw
 $cargo = $cargo -replace 'version = "' + $current + '"', 'version = "' + $Version + '"'
-Set-Content "src-tauri\Cargo.toml" -Value $cargo -NoNewline
+[System.IO.File]::WriteAllText((Resolve-Path "src-tauri\Cargo.toml").Path, $cargo)
 
 Write-Host "Versiyon: v$current -> v$Version (tauri.conf.json + package.json + Cargo.toml)" -ForegroundColor Cyan
 
