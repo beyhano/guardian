@@ -4,10 +4,18 @@ import { check } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
 import Swal from 'sweetalert2'
 
+interface UpdateInfo {
+  version: string
+  body?: string
+  available: boolean
+  downloadAndInstall(): Promise<void>
+}
+
 const checking = ref(false)
 let autoCheckTimer: ReturnType<typeof setTimeout> | null = null
+let periodicTimer: ReturnType<typeof setInterval> | null = null
 
-async function promptAndInstall(update: Awaited<ReturnType<typeof check>>) {
+async function promptAndInstall(update: UpdateInfo) {
   if (!update?.available) return
 
   const result = await Swal.fire({
@@ -77,11 +85,14 @@ async function checkForUpdates(silent = false) {
 }
 
 onMounted(() => {
-  autoCheckTimer = setTimeout(() => checkForUpdates(true), 3000)
+  autoCheckTimer = setTimeout(() => checkForUpdates(true), 5000)
+  // 6 saatte bir arka planda güncelleme kontrolü
+  periodicTimer = setInterval(() => checkForUpdates(true), 6 * 60 * 60 * 1000)
 })
 
 onUnmounted(() => {
   if (autoCheckTimer) clearTimeout(autoCheckTimer)
+  if (periodicTimer) clearInterval(periodicTimer)
 })
 </script>
 
