@@ -265,6 +265,54 @@ impl ProcessManager {
         Ok(())
     }
 
+    pub async fn update_process(&self, id: &str, config: ProcessConfig) -> Result<(), String> {
+        let mut processes = self.processes.lock().await;
+        let process = processes.get_mut(id).ok_or_else(|| "Process not found".to_string())?;
+
+        // Runtime state'i koru
+        let status = process.status;
+        let restart_count = process.restart_count;
+        let pid = process.pid;
+        let start_time = process.start_time;
+        let stop_tx = process.stop_tx.take();
+
+        // ID'yi parametreden gelen değerle koru
+        let mut updated_config = config;
+        updated_config.id = id.to_string();
+
+        // SQLite güncelle
+        let conn = self.connect_db()?;
+        let args_json = serde_json::to_string(&updated_config.args)
+            .map_err(|e| format!("Failed to serialize arguments: {}", e))?;
+
+        conn.execute(
+            "UPDATE processes SET name=?, command=?, args=?, cwd=?, auto_restart=?, max_restarts=?, auto_start=? WHERE id=?",
+            rusqlite::params![
+                updated_config.name,
+                updated_config.command,
+                args_json,
+                updated_config.cwd,
+                if updated_config.auto_restart { 1 } else { 0 },
+                updated_config.max_restarts as i64,
+                if updated_config.auto_start { 1 } else { 0 },
+                id,
+            ],
+        )
+        .map_err(|e| format!("Failed to update process in database: {}", e))?;
+
+        // Runtime config'i güncelle, state'i geri yükle
+        *process = ActiveProcess {
+            config: updated_config,
+            status,
+            restart_count,
+            pid,
+            start_time,
+            stop_tx,
+        };
+
+        Ok(())
+    }
+
     pub async fn remove_process(&self, id: &str) -> Result<(), String> {
         self.stop_process(id).await?;
 
@@ -614,5 +662,67 @@ mod tests {
         assert_eq!(last_lines[2], "Line 10");
 
         let _ = std::fs::remove_file(log_path);
+    }
+
+    #[test]
+    fn test_update_process() {
+        let mut processes = std::collections::HashMap::new();
+
+        let original = ProcessConfig {
+            id: "test-srv".to_string(),
+            name: "Original".to_string(),
+            command: "echo".to_string(),
+            args: vec!["hello".to_string()],
+            cwd: None,
+            auto_restart: false,
+            max_restarts: 0,
+            auto_start: false,
+        };
+
+        processes.insert(
+            "test-srv".to_string(),
+            ActiveProcess {
+                config: original,
+                status: ProcessStatus::Running,
+                restart_count: 2,
+                pid: Some(12345),
+                start_time: Some(chrono::Utc::now()),
+                stop_tx: None,
+            },
+        );
+
+        let updated = ProcessConfig {
+            id: "test-srv".to_string(),
+            name: "Updated".to_string(),
+            command: "ping".to_string(),
+            args: vec!["localhost".to_string()],
+            cwd: Some("C:\\tmp".to_string()),
+            auto_restart: true,
+            max_restarts: 5,
+            auto_start: true,
+        };
+
+        if let Some(ap) = processes.get_mut("test-srv") {
+            ap.config = updated.clone();
+        }
+
+        let result = processes.get("test-srv").unwrap();
+        assert_eq!(result.config.name, "Updated");
+        assert_eq!(result.config.command, "ping");
+        assert_eq!(result.config.args, vec!["localhost"]);
+        assert_eq!(result.config.cwd, Some("C:\\tmp".to_string()));
+        assert!(result.config.auto_restart);
+        assert_eq!(result.config.max_restarts, 5);
+        assert!(result.config.auto_start);
+        // Runtime state korunmalı
+        assert_eq!(result.status, ProcessStatus::Running);
+        assert_eq!(result.restart_count, 2);
+        assert!(result.pid.is_some());
+    }
+
+    #[test]
+    fn test_update_process_not_found() {
+        let mut processes: std::collections::HashMap<String, ActiveProcess> = std::collections::HashMap::new();
+        assert!(processes.get_mut("nonexistent").is_none());
     }
 }
