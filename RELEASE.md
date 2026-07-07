@@ -51,7 +51,7 @@ Eğer build'i local'de almak istemezsen (GitHub Actions yapsın):
 Build tetiklendiğinde şu adresten takip edebilirsin:
 
 ```
-https://github.com/beyhan/guardian/actions
+https://github.com/beyhano/guardian/actions
 ```
 
 Yaklaşık 5-10 dakika sürer.
@@ -61,7 +61,7 @@ Yaklaşık 5-10 dakika sürer.
 Build bitince şu adreste bir **draft release** oluşur:
 
 ```
-https://github.com/beyhan/guardian/releases
+https://github.com/beyhano/guardian/releases
 ```
 
 1. Draft release'e tıkla

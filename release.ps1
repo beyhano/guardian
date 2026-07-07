@@ -114,5 +114,5 @@ git push origin main
 git push origin "v$Version"
 
 Write-Host "`n🚀 v$Version release tetiklendi!" -ForegroundColor Green
-Write-Host "   https://github.com/beyhan/guardian/actions" -ForegroundColor Cyan
-Write-Host "   https://github.com/beyhan/guardian/releases" -ForegroundColor Cyan
+Write-Host "   https://github.com/beyhano/guardian/actions" -ForegroundColor Cyan
+Write-Host "   https://github.com/beyhano/guardian/releases" -ForegroundColor Cyan
