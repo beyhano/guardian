@@ -377,6 +377,16 @@ impl ProcessManager {
         process.status = ProcessStatus::Stopped;
         process.pid = None;
         process.start_time = None;
+
+        // Manuel durduruldu — otomatik başlamasın diye DB'de auto_start = 0 yap
+        process.config.auto_start = false;
+        if let Ok(conn) = self.connect_db() {
+            let _ = conn.execute(
+                "UPDATE processes SET auto_start = 0 WHERE id = ?",
+                rusqlite::params![id],
+            );
+        }
+
         self.emit_status_changed(id, ProcessStatus::Stopped);
         Ok(())
     }
