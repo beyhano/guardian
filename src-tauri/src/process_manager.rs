@@ -8,6 +8,17 @@ use tokio::io::{AsyncBufReadExt, BufReader, AsyncWriteExt};
 use tokio::fs::OpenOptions;
 use tauri::{AppHandle, Emitter, Manager};
 
+/// Windows'ta console penceresi açılmasını önleyerek komut oluşturur.
+fn cmd_no_window(program: &str) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 fn default_auto_start() -> bool {
     true
 }
@@ -377,7 +388,7 @@ impl ProcessManager {
 
         #[cfg(windows)]
         {
-            let _ = tokio::process::Command::new("taskkill")
+            let _ = cmd_no_window("taskkill")
                 .args(&["/F", "/T", "/IM", exe_name])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
@@ -414,7 +425,7 @@ impl ProcessManager {
         if let Some(pid) = process.pid {
             #[cfg(windows)]
             {
-                let mut kill_cmd = tokio::process::Command::new("taskkill");
+                let mut kill_cmd = cmd_no_window("taskkill");
                 kill_cmd.args(&["/F", "/T", "/PID", &pid.to_string()]);
                 let _ = kill_cmd.status().await;
             }
@@ -477,7 +488,7 @@ impl ProcessManager {
                 if let Some(pid) = process.pid {
                     #[cfg(windows)]
                     {
-                        let mut kill_cmd = tokio::process::Command::new("taskkill");
+                        let mut kill_cmd = cmd_no_window("taskkill");
                         kill_cmd.args(&["/F", "/T", "/PID", &pid.to_string()]);
                         let _ = kill_cmd.status().await;
                     }
@@ -539,7 +550,7 @@ impl ProcessManager {
         };
 
         if cfg!(windows) {
-            let output = tokio::process::Command::new("tasklist")
+            let output = cmd_no_window("tasklist")
                 .args(&["/NH", "/FO", "CSV", "/FI", &format!("IMAGENAME eq {}", exe_name)])
                 .output()
                 .await
@@ -580,7 +591,7 @@ impl ProcessManager {
         #[cfg(windows)]
         {
             // Önce taskkill /F /T ile dene
-            let taskkill_output = tokio::process::Command::new("taskkill")
+            let taskkill_output = cmd_no_window("taskkill")
                 .args(&["/F", "/T", "/PID", &pid.to_string()])
                 .output()
                 .await
@@ -594,7 +605,7 @@ impl ProcessManager {
             let stdout = String::from_utf8_lossy(&taskkill_output.stdout);
 
             // taskkill başarısız -> PowerShell ile dene (daha agresif)
-            let ps_output = tokio::process::Command::new("powershell")
+            let ps_output = cmd_no_window("powershell")
                 .args(&[
                     "-Command",
                     &format!("Stop-Process -Id {} -Force -ErrorAction Stop", pid),
@@ -609,7 +620,7 @@ impl ProcessManager {
             }
 
             // PowerShell de başarısız -> wmic ile son çare dene
-            let wmic_output = tokio::process::Command::new("wmic")
+            let wmic_output = cmd_no_window("wmic")
                 .args(&["process", "where", &format!("ProcessId={}", pid), "delete"])
                 .output()
                 .await;
@@ -838,7 +849,7 @@ impl ProcessManager {
                 for (proc_id, exe_name) in &running_commands {
                     #[cfg(windows)]
                     {
-                        let output = tokio::process::Command::new("tasklist")
+                        let output = cmd_no_window("tasklist")
                             .args(&["/NH", "/FO", "CSV", "/FI", &format!("IMAGENAME eq {}", exe_name)])
                             .output()
                             .await;
