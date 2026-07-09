@@ -334,6 +334,16 @@ impl ProcessManager {
     }
 
     pub async fn start_process(&self, id: &str) -> Result<(), String> {
+        // Önce duplicate kontrolü (lock dışında — tasklist uzun sürebilir)
+        let command_to_check: Option<String> = {
+            let processes = self.processes.lock().await;
+            processes.get(id).map(|p| p.config.command.clone())
+        };
+
+        if let Some(cmd) = command_to_check {
+            self.check_external_duplicate(&cmd).await?;
+        }
+
         let mut processes = self.processes.lock().await;
         let process = processes.get_mut(id).ok_or_else(|| "Process not found".to_string())?;
 
@@ -341,7 +351,7 @@ impl ProcessManager {
             return Err("Process is already running or restarting".to_string());
         }
 
-        process.restart_count = 0; // Reset restart counter on manual start
+        process.restart_count = 0;
         self.spawn_process_internal(id, process).await?;
         Ok(())
     }
@@ -396,6 +406,60 @@ impl ProcessManager {
     pub fn get_process_logs(&self, id: &str, max_lines: usize) -> Result<Vec<String>, String> {
         let log_path = self.logs_dir.join(format!("{}.log", id));
         read_last_lines_sync(&log_path, max_lines)
+    }
+
+    /// Sistemde aynı executable'ın Guardian dışında çalışıp çalışmadığını kontrol eder.
+    /// Eğer çalışıyorsa Err döndürür.
+    async fn check_external_duplicate(&self, command: &str) -> Result<(), String> {
+        let exe_name = std::path::Path::new(command)
+            .file_name()
+            .and_then(|f| f.to_str())
+            .ok_or_else(|| format!("Geçersiz komut yolu: {}", command))?;
+
+        // Guardian'ın bildiği PID'leri topla (lock sonra serbest bırakılır)
+        let known_pids: Vec<u32> = {
+            let processes = self.processes.lock().await;
+            processes.values().filter_map(|p| p.pid).collect()
+        };
+
+        if cfg!(windows) {
+            let output = tokio::process::Command::new("tasklist")
+                .args(&["/NH", "/FO", "CSV", "/FI", &format!("IMAGENAME eq {}", exe_name)])
+                .output()
+                .await
+                .map_err(|e| format!("tasklist çalıştırılamadı: {}", e))?;
+
+            if !output.status.success() {
+                return Ok(()); // tasklist başarısız olursa sessiz geç
+            }
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let line = line.trim();
+                if line.is_empty() { continue; }
+
+                // CSV format: "image.exe","pid","session","session#","mem kullanımı"
+                let parts: Vec<&str> = line.split(',').collect();
+                if parts.len() < 2 { continue; }
+
+                let pid_str = parts[1].trim_matches('"');
+                if let Ok(pid) = pid_str.parse::<u32>() {
+                    if !known_pids.contains(&pid) {
+                        return Err(format!(
+                            "'{}' PID {} ile sistemde zaten çalışıyor. Önce durdurun veya restart kullanın.",
+                            exe_name, pid
+                        ));
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    async fn check_external_duplicate(&self, _command: &str) -> Result<(), String> {
+        Ok(()) // Windows dışında kontrol yok
     }
 
     async fn spawn_process_internal(&self, id: &str, process: &mut ActiveProcess) -> Result<(), String> {
