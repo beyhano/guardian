@@ -26,6 +26,14 @@ async fn stop_process(
 }
 
 #[tauri::command]
+async fn restart_process(
+    id: String,
+    manager: tauri::State<'_, process_manager::ProcessManager>,
+) -> Result<(), String> {
+    manager.restart_process(&id).await
+}
+
+#[tauri::command]
 async fn add_process(
     config: process_manager::ProcessConfig,
     manager: tauri::State<'_, process_manager::ProcessManager>,
@@ -84,6 +92,7 @@ pub fn run() {
             get_processes,
             start_process,
             stop_process,
+            restart_process,
             add_process,
             remove_process,
             get_process_logs,

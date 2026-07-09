@@ -8,5 +8,6 @@ commands.allow = [
   "add_process",
   "remove_process",
   "get_process_logs",
-  "update_process"
+  "update_process",
+  "restart_process"
 ]

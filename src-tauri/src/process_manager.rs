@@ -403,6 +403,82 @@ impl ProcessManager {
         Ok(())
     }
 
+    pub async fn restart_process(&self, id: &str) -> Result<(), String> {
+        // Running durumunda önce duplicate kontrolüne gerek yok (kendimiz durduracagiz)
+        // Stopped/Crashed durumunda kontrol et
+        let command_to_check: Option<String> = {
+            let processes = self.processes.lock().await;
+            let p = processes.get(id);
+            match p.map(|p| p.status) {
+                Some(ProcessStatus::Stopped) | Some(ProcessStatus::Crashed) => {
+                    p.map(|p| p.config.command.clone())
+                }
+                _ => None,
+            }
+        };
+
+        if let Some(cmd) = command_to_check {
+            self.check_external_duplicate(&cmd).await?;
+        }
+
+        let mut processes = self.processes.lock().await;
+        let process = processes.get_mut(id).ok_or_else(|| "Process not found".to_string())?;
+
+        match process.status {
+            ProcessStatus::Running => {
+                // Durum 1: Çalışıyor → durdur ve yeniden başlat
+                process.status = ProcessStatus::Stopping;
+                self.emit_status_changed(id, ProcessStatus::Stopping);
+
+                if let Some(stop_tx) = process.stop_tx.take() {
+                    let _ = stop_tx.send(());
+                }
+
+                if let Some(pid) = process.pid {
+                    #[cfg(windows)]
+                    {
+                        let mut kill_cmd = tokio::process::Command::new("taskkill");
+                        kill_cmd.args(&["/F", "/T", "/PID", &pid.to_string()]);
+                        let _ = kill_cmd.status().await;
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        let mut kill_cmd = tokio::process::Command::new("kill");
+                        kill_cmd.args(&["-9", &pid.to_string()]);
+                        let _ = kill_cmd.status().await;
+                    }
+                }
+
+                process.status = ProcessStatus::Stopped;
+                process.pid = None;
+                process.start_time = None;
+                self.emit_status_changed(id, ProcessStatus::Stopped);
+
+                // Port/socket release için kısa bekle
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+                // Manuel restart — sayacı sıfırla
+                process.restart_count = 0;
+
+                // Yeniden başlat
+                self.spawn_process_internal(id, process).await?;
+                Ok(())
+            }
+            ProcessStatus::Stopped | ProcessStatus::Crashed => {
+                // Durum 2: Durmuş veya çökmüş → direkt başlat
+                process.restart_count = 0;
+                self.spawn_process_internal(id, process).await?;
+                Ok(())
+            }
+            ProcessStatus::Restarting => {
+                Err("Process is already restarting".to_string())
+            }
+            ProcessStatus::Stopping => {
+                Err("Process is stopping".to_string())
+            }
+        }
+    }
+
     pub fn get_process_logs(&self, id: &str, max_lines: usize) -> Result<Vec<String>, String> {
         let log_path = self.logs_dir.join(format!("{}.log", id));
         read_last_lines_sync(&log_path, max_lines)
