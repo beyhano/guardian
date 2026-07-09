@@ -2,7 +2,7 @@
 name = "guardian"
 version = "0.1.1"
 description = "Gardiyan"
-authors = ["Beyhan Oğur <beyhan@beyhan.dev>"]
+authors = ["Beyhan OÄŸur <beyhan@beyhan.dev>"]
 edition = "2021"
 license = "GPL-3.0-only"
 
