@@ -152,14 +152,27 @@ async function handleStartProcess(id: string) {
         color: "#f3f4f6",
       });
     } catch (error) {
-      Swal.fire({
-        title: "Hata!",
-        text: `Süreç başlatılamadı: ${error}`,
-        icon: "error",
-        background: "#151b2d",
-        color: "#f3f4f6",
-        confirmButtonColor: "#3b82f6",
-      });
+      const errorMsg = String(error);
+      if (errorMsg.includes("zaten çalışıyor")) {
+        Swal.fire({
+          title: "Program Zaten Çalışıyor!",
+          text: errorMsg,
+          icon: "warning",
+          confirmButtonText: "Tamam",
+          background: "#151b2d",
+          color: "#f3f4f6",
+          confirmButtonColor: "#f59e0b",
+        });
+      } else {
+        Swal.fire({
+          title: "Hata!",
+          text: `Süreç başlatılamadı: ${error}`,
+          icon: "error",
+          background: "#151b2d",
+          color: "#f3f4f6",
+          confirmButtonColor: "#3b82f6",
+        });
+      }
     }
   }
 }
@@ -195,6 +208,44 @@ async function handleStopProcess(id: string) {
       Swal.fire({
         title: "Hata!",
         text: `Süreç durdurulamadı: ${error}`,
+        icon: "error",
+        background: "#151b2d",
+        color: "#f3f4f6",
+        confirmButtonColor: "#3b82f6",
+      });
+    }
+  }
+}
+
+async function handleRestartProcess(id: string) {
+  try {
+    await invoke("restart_process", { id });
+    await fetchProcesses();
+    Swal.fire({
+      title: "Yeniden Başlatıldı!",
+      text: "Süreç başarıyla yeniden başlatıldı.",
+      icon: "success",
+      timer: 1500,
+      showConfirmButton: false,
+      background: "#151b2d",
+      color: "#f3f4f6",
+    });
+  } catch (error) {
+    const errorMsg = String(error);
+    if (errorMsg.includes("zaten çalışıyor")) {
+      Swal.fire({
+        title: "Program Zaten Çalışıyor!",
+        text: errorMsg,
+        icon: "warning",
+        confirmButtonText: "Tamam",
+        background: "#151b2d",
+        color: "#f3f4f6",
+        confirmButtonColor: "#f59e0b",
+      });
+    } else {
+      Swal.fire({
+        title: "Hata!",
+        text: `Süreç yeniden başlatılamadı: ${error}`,
         icon: "error",
         background: "#151b2d",
         color: "#f3f4f6",
@@ -524,6 +575,14 @@ onUnmounted(() => {
                 @click="handleStopProcess(p.id)"
               >
                 ■ Durdur
+              </button>
+              <button
+                v-if="p.status === 'Running' || p.status === 'Crashed'"
+                class="btn-action btn-restart"
+                title="Yeniden Başlat"
+                @click="handleRestartProcess(p.id)"
+              >
+                🔄 Yeniden Başlat
               </button>
               <button
                 class="btn-action btn-logs"
@@ -1077,6 +1136,12 @@ body {
   background: rgba(239, 68, 68, 0.1);
 }
 .btn-stop:hover { background: rgba(239, 68, 68, 0.2); }
+
+.btn-restart {
+  color: var(--status-restarting);
+  background: rgba(245, 158, 11, 0.1);
+}
+.btn-restart:hover { background: rgba(245, 158, 11, 0.2); }
 
 .btn-logs.active {
   color: var(--accent-primary);
