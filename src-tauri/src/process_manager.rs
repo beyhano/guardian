@@ -457,11 +457,6 @@ impl ProcessManager {
         Ok(())
     }
 
-    #[cfg(not(windows))]
-    async fn check_external_duplicate(&self, _command: &str) -> Result<(), String> {
-        Ok(()) // Windows dışında kontrol yok
-    }
-
     async fn spawn_process_internal(&self, id: &str, process: &mut ActiveProcess) -> Result<(), String> {
         let mut cmd = tokio::process::Command::new(&process.config.command);
         cmd.args(&process.config.args);
