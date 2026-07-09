@@ -356,6 +356,46 @@ impl ProcessManager {
         Ok(())
     }
 
+    /// Duplicate kontrolü OLMADAN süreci başlatır.
+    /// Önce sistemdeki tüm instance'ları taskkill /IM ile öldürür,
+    /// sonra doğrudan spawn eder. "Durdur ve Başlat" dialogu için.
+    pub async fn force_start_process(&self, id: &str) -> Result<(), String> {
+        let command_path = {
+            let processes = self.processes.lock().await;
+            let p = processes.get(id).ok_or_else(|| "Process not found".to_string())?;
+            if p.status == ProcessStatus::Running || p.status == ProcessStatus::Restarting {
+                return Err("Process is already running or restarting".to_string());
+            }
+            p.config.command.clone()
+        };
+
+        // Tüm instance'ları image name ile öldür
+        let exe_name = std::path::Path::new(&command_path)
+            .file_name()
+            .and_then(|f| f.to_str())
+            .ok_or_else(|| format!("Geçersiz komut yolu: {}", command_path))?;
+
+        #[cfg(windows)]
+        {
+            let _ = tokio::process::Command::new("taskkill")
+                .args(&["/F", "/T", "/IM", exe_name])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await;
+            // taskkill exit code 0=öldü, 128=zaten yok — ikisi de sorun değil
+        }
+
+        // Kısa bekle — Windows process tablosu güncellensin
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        let mut processes = self.processes.lock().await;
+        let process = processes.get_mut(id).ok_or_else(|| "Process not found".to_string())?;
+        process.restart_count = 0;
+        self.spawn_process_internal(id, process).await?;
+        Ok(())
+    }
+
     pub async fn stop_process(&self, id: &str) -> Result<(), String> {
         let mut processes = self.processes.lock().await;
         let process = processes.get_mut(id).ok_or_else(|| "Process not found".to_string())?;
@@ -533,6 +573,75 @@ impl ProcessManager {
         Ok(())
     }
 
+    /// Sistemde çalışan dış bir süreci PID ile zorla sonlandırır.
+    /// Guardian yönetimindeki süreçler için değil, duplicate kontrolünde
+    /// bulunan harici process'leri öldürmek için kullanılır.
+    pub async fn kill_process_by_pid(&self, pid: u32) -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            // Önce taskkill /F /T ile dene
+            let taskkill_output = tokio::process::Command::new("taskkill")
+                .args(&["/F", "/T", "/PID", &pid.to_string()])
+                .output()
+                .await
+                .map_err(|e| format!("taskkill çalıştırılamadı: {}", e))?;
+
+            if taskkill_output.status.success() {
+                return Ok(());
+            }
+
+            let stderr = String::from_utf8_lossy(&taskkill_output.stderr);
+            let stdout = String::from_utf8_lossy(&taskkill_output.stdout);
+
+            // taskkill başarısız -> PowerShell ile dene (daha agresif)
+            let ps_output = tokio::process::Command::new("powershell")
+                .args(&[
+                    "-Command",
+                    &format!("Stop-Process -Id {} -Force -ErrorAction Stop", pid),
+                ])
+                .output()
+                .await;
+
+            if let Ok(out) = ps_output {
+                if out.status.success() {
+                    return Ok(());
+                }
+            }
+
+            // PowerShell de başarısız -> wmic ile son çare dene
+            let wmic_output = tokio::process::Command::new("wmic")
+                .args(&["process", "where", &format!("ProcessId={}", pid), "delete"])
+                .output()
+                .await;
+
+            if let Ok(out) = wmic_output {
+                if out.status.success() {
+                    return Ok(());
+                }
+            }
+
+            let taskkill_err = if stderr.is_empty() { stdout.trim().to_string() } else { stderr.trim().to_string() };
+            Err(format!(
+                "PID {} sonlandırılamadı.\ntaskkill: {}\npowershell: Stop-Process başarısız\nwmic: başarısız\n\nUygulamayı Yönetici olarak çalıştırmayı deneyin (Sağ tık → Yönetici olarak çalıştır).",
+                pid, taskkill_err
+            ))
+        }
+        #[cfg(not(windows))]
+        {
+            let output = tokio::process::Command::new("kill")
+                .args(&["-9", &pid.to_string()])
+                .output()
+                .await
+                .map_err(|e| format!("kill çalıştırılamadı: {}", e))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("PID {} sonlandırılamadı: {}", pid, stderr));
+            }
+            Ok(())
+        }
+    }
+
     async fn spawn_process_internal(&self, id: &str, process: &mut ActiveProcess) -> Result<(), String> {
         let mut cmd = tokio::process::Command::new(&process.config.command);
         cmd.args(&process.config.args);
@@ -688,6 +797,93 @@ impl ProcessManager {
                 status,
             },
         );
+    }
+
+    /// Her 10 saniyede bir, Running durumundaki süreçlerin sistemde
+    /// Guardian dışında da çalışıp çalışmadığını kontrol eder.
+    /// Tespit edilirse frontend'e `duplicate-detected` event'i gönderir.
+    pub fn start_duplicate_monitor(&self) {
+        let pm = self.clone();
+        tauri::async_runtime::spawn(async move {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+
+                // Sadece Running süreçlerin komutlarını topla
+                let running_commands: Vec<(String, String)> = {
+                    let processes = pm.processes.lock().await;
+                    processes
+                        .iter()
+                        .filter(|(_, p)| p.status == ProcessStatus::Running)
+                        .filter_map(|(id, p)| {
+                            let exe = std::path::Path::new(&p.config.command)
+                                .file_name()
+                                .and_then(|f| f.to_str())
+                                .map(|s| s.to_string())?;
+                            Some((id.clone(), exe))
+                        })
+                        .collect()
+                };
+
+                if running_commands.is_empty() {
+                    continue;
+                }
+
+                // Guardian'ın bildiği PID'ler
+                let known_pids: Vec<u32> = {
+                    let processes = pm.processes.lock().await;
+                    processes.values().filter_map(|p| p.pid).collect()
+                };
+
+                // Her exe için tasklist sorgula
+                for (proc_id, exe_name) in &running_commands {
+                    #[cfg(windows)]
+                    {
+                        let output = tokio::process::Command::new("tasklist")
+                            .args(&["/NH", "/FO", "CSV", "/FI", &format!("IMAGENAME eq {}", exe_name)])
+                            .output()
+                            .await;
+
+                        let output = match output {
+                            Ok(o) if o.status.success() => o,
+                            _ => continue,
+                        };
+
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        let mut external_pids: Vec<u32> = Vec::new();
+
+                        for line in stdout.lines() {
+                            let line = line.trim();
+                            if line.is_empty() { continue; }
+                            let parts: Vec<&str> = line.split(',').collect();
+                            if parts.len() < 2 { continue; }
+                            let pid_str = parts[1].trim_matches('"');
+                            if let Ok(pid) = pid_str.parse::<u32>() {
+                                if !known_pids.contains(&pid) {
+                                    external_pids.push(pid);
+                                }
+                            }
+                        }
+
+                        if !external_pids.is_empty() {
+                            #[derive(Clone, serde::Serialize)]
+                            struct DuplicatePayload {
+                                id: String,
+                                exe_name: String,
+                                external_pids: Vec<u32>,
+                            }
+                            let _ = pm.app_handle.emit(
+                                "duplicate-detected",
+                                DuplicatePayload {
+                                    id: proc_id.clone(),
+                                    exe_name: exe_name.clone(),
+                                    external_pids,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+        });
     }
 }
 

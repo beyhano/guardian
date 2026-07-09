@@ -9,5 +9,7 @@ commands.allow = [
   "remove_process",
   "get_process_logs",
   "update_process",
-  "restart_process"
+  "restart_process",
+  "kill_external_pid",
+  "force_start_process"
 ]

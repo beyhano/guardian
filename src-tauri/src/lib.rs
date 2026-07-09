@@ -59,6 +59,22 @@ async fn get_process_logs(
 }
 
 #[tauri::command]
+async fn force_start_process(
+    id: String,
+    manager: tauri::State<'_, process_manager::ProcessManager>,
+) -> Result<(), String> {
+    manager.force_start_process(&id).await
+}
+
+#[tauri::command]
+async fn kill_external_pid(
+    pid: u32,
+    manager: tauri::State<'_, process_manager::ProcessManager>,
+) -> Result<(), String> {
+    manager.kill_process_by_pid(pid).await
+}
+
+#[tauri::command]
 async fn update_process(
     id: String,
     config: process_manager::ProcessConfig,
@@ -85,6 +101,9 @@ pub fn run() {
                 let _ = manager_clone.auto_start_processes().await;
             });
             
+            // Arka plan duplicate izleyicisini başlat
+            manager.start_duplicate_monitor();
+
             app.manage(manager);
             Ok(())
         })
@@ -96,7 +115,9 @@ pub fn run() {
             add_process,
             remove_process,
             get_process_logs,
-            update_process
+            update_process,
+            kill_external_pid,
+            force_start_process
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

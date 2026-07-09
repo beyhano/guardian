@@ -154,15 +154,45 @@ async function handleStartProcess(id: string) {
     } catch (error) {
       const errorMsg = String(error);
       if (errorMsg.includes("zaten çalışıyor")) {
-        Swal.fire({
+        const killResult = await Swal.fire({
           title: "Program Zaten Çalışıyor!",
           text: errorMsg,
           icon: "warning",
-          confirmButtonText: "Tamam",
+          showConfirmButton: true,
+          showCancelButton: true,
+          confirmButtonText: "🔫 Var Olanı Durdur ve Başlat",
+          cancelButtonText: "İptal",
+          confirmButtonColor: "#ef4444",
+          cancelButtonColor: "rgba(255, 255, 255, 0.08)",
           background: "#151b2d",
           color: "#f3f4f6",
-          confirmButtonColor: "#f59e0b",
         });
+        if (killResult.isConfirmed) {
+          try {
+            // force_start_process: taskkill /IM ile tüm instance'ları öldürür,
+            // duplicate kontrolü yapmadan doğrudan başlatır
+            await invoke("force_start_process", { id });
+            await fetchProcesses();
+            Swal.fire({
+              title: "Başlatıldı!",
+              text: "Eski süreç(ler) sonlandırıldı ve yeni süreç başlatıldı.",
+              icon: "success",
+              timer: 1500,
+              showConfirmButton: false,
+              background: "#151b2d",
+              color: "#f3f4f6",
+            });
+          } catch (killError) {
+            Swal.fire({
+              title: "Hata!",
+              text: `Süreç başlatılamadı: ${killError}`,
+              icon: "error",
+              background: "#151b2d",
+              color: "#f3f4f6",
+              confirmButtonColor: "#3b82f6",
+            });
+          }
+        }
       } else {
         Swal.fire({
           title: "Hata!",
@@ -233,15 +263,45 @@ async function handleRestartProcess(id: string) {
   } catch (error) {
     const errorMsg = String(error);
     if (errorMsg.includes("zaten çalışıyor")) {
-      Swal.fire({
+      const killResult = await Swal.fire({
         title: "Program Zaten Çalışıyor!",
         text: errorMsg,
         icon: "warning",
-        confirmButtonText: "Tamam",
+        showConfirmButton: true,
+        showCancelButton: true,
+        confirmButtonText: "🔫 Var Olanı Durdur ve Yeniden Başlat",
+        cancelButtonText: "İptal",
+        confirmButtonColor: "#ef4444",
+        cancelButtonColor: "rgba(255, 255, 255, 0.08)",
         background: "#151b2d",
         color: "#f3f4f6",
-        confirmButtonColor: "#f59e0b",
       });
+      if (killResult.isConfirmed) {
+        try {
+          // force_start_process duplicate kontrolü yapmaz, önce tüm
+          // instance'ları /IM ile öldürür sonra başlatır
+          await invoke("force_start_process", { id });
+          await fetchProcesses();
+          Swal.fire({
+            title: "Yeniden Başlatıldı!",
+            text: "Eski süreç(ler) sonlandırıldı ve yeni süreç başlatıldı.",
+            icon: "success",
+            timer: 1500,
+            showConfirmButton: false,
+            background: "#151b2d",
+            color: "#f3f4f6",
+          });
+        } catch (killError) {
+          Swal.fire({
+            title: "Hata!",
+            text: `Süreç başlatılamadı: ${killError}`,
+            icon: "error",
+            background: "#151b2d",
+            color: "#f3f4f6",
+            confirmButtonColor: "#3b82f6",
+          });
+        }
+      }
     } else {
       Swal.fire({
         title: "Hata!",
@@ -419,7 +479,9 @@ function formatUptime(secs: number): string {
 
 let unlistenLog: (() => void) | null = null;
 let unlistenStatus: (() => void) | null = null;
+let unlistenDuplicate: (() => void) | null = null;
 let pollInterval: any = null;
+const duplicateNotified = new Set<string>();
 
 onMounted(async () => {
   await fetchProcesses();
@@ -459,6 +521,30 @@ onMounted(async () => {
     }
   );
 
+  // Listen for duplicate external process detection
+  unlistenDuplicate = await listen<{
+    id: string;
+    exe_name: string;
+    external_pids: number[];
+  }>("duplicate-detected", (event) => {
+    const { id, exe_name, external_pids } = event.payload;
+    // Aynı süreç için aynı oturumda sadece bir kere bildir
+    const key = `${id}-${external_pids.join(",")}`;
+    if (duplicateNotified.has(key)) return;
+    duplicateNotified.add(key);
+    Swal.fire({
+      title: "👥 Dış Süreç Tespit Edildi!",
+      html: `<b>${id}</b> (<code>${exe_name}</code>)<br>
+PID <b>${external_pids.join(", ")}</b> sistemde Guardian dışında çalışıyor.<br>
+İki instance aynı anda çalışırsa çakışma olabilir.`,
+      icon: "warning",
+      confirmButtonText: "Tamam",
+      background: "#151b2d",
+      color: "#f3f4f6",
+      confirmButtonColor: "#f59e0b",
+    });
+  });
+
   // Poll for uptime updates and active list
   pollInterval = setInterval(() => {
     fetchProcesses();
@@ -468,6 +554,7 @@ onMounted(async () => {
 onUnmounted(() => {
   if (unlistenLog) unlistenLog();
   if (unlistenStatus) unlistenStatus();
+  if (unlistenDuplicate) unlistenDuplicate();
   if (pollInterval) clearInterval(pollInterval);
 });
 </script>
