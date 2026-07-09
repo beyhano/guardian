@@ -1,8 +1,8 @@
 [package]
 name = "guardian"
 version = "0.1.1"
-description = "A Tauri App"
-authors = ["Beyhan Oğur <beyhano@gmail.com>"]
+description = "Gardiyan"
+authors = ["Beyhan Oğur <beyhan@beyhan.dev>"]
 edition = "2021"
 license = "GPL-3.0-only"
 
